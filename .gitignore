@@ -1,3 +1,10 @@
 node_modules/
 .env
 *.log
+.gitignore
+
+# Documentation backups
+README.md
+server-original.js
+README copy.md
+
