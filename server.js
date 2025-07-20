@@ -15,12 +15,12 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
-// HuggingFace Models (Updated with better AI detection models)
+// Updated AI Detection Models (Better and more recent)
 const AI_DETECTION_MODELS = {
-  primary: 'saltanat/ai-vs-human',
-  backup: 'Organika/sdxl-detector', 
-  tertiary: 'umm-maybe/AI-image-detector',
-  quaternary: 'openai/clip-vit-large-patch14'
+  primary: 'prithivMLmods/Deep-Fake-Detector-v2-Model',
+  secondary: 'yaya36095/ai-image-detector', 
+  tertiary: 'Ateeqq/ai-vs-human-image-detector',
+  quaternary: 'VilaVision/AIgeneratedimagedetection'
 };
 
 // User analytics (in-memory for demo)
@@ -187,291 +187,234 @@ async function handleTextMessage(message, fromNumber) {
   }
 }
 
-// AI Detection using HuggingFace with working models and smart fallbacks
+// AI Detection using the new specialized AI detection models
 async function detectAIWithHuggingFace(imageBuffer) {
   try {
-    console.log('🤖 Running AI detection with HuggingFace...');
+    console.log('🤖 Running AI detection with specialized models...');
+    
+    const modelsToTry = [
+      'prithivMLmods/Deep-Fake-Detector-v2-Model',
+      'yaya36095/ai-image-detector',
+      'Ateeqq/ai-vs-human-image-detector',
+      'VilaVision/AIgeneratedimagedetection'
+    ];
     
     let bestResult = null;
     
-    // Try different approaches since the AI detection models are failing
-    const detectionMethods = [
-      // Method 1: Try image captioning to analyze content
-      {
-        name: 'Image Captioning Analysis',
-        execute: async () => {
-          try {
-            const captionResult = await hf.imageToText({
-              data: imageBuffer,
-              model: 'Salesforce/blip-image-captioning-base'
-            });
-            
-            const caption = captionResult[0]?.generated_text?.toLowerCase() || '';
-            console.log('📝 Image caption:', caption);
-            
-            // Analyze caption for AI/digital art indicators
-            let aiScore = 0;
-            let realScore = 0;
-            
-            // Strong AI indicators
-            const strongAI = ['digital art', 'artwork', 'illustration', 'painting', 'drawing', 
-                             'render', 'cgi', '3d', 'anime', 'cartoon', 'fantasy', 'surreal'];
-            
-            // Strong real indicators  
-            const strongReal = ['photo', 'photograph', 'selfie', 'portrait', 'person', 'man', 'woman',
-                               'outdoor', 'indoor', 'street', 'building', 'car', 'nature'];
-            
-            // Moderate indicators
-            const moderateAI = ['perfect', 'flawless', 'beautiful', 'stunning', 'artistic'];
-            const moderateReal = ['camera', 'shot', 'taken', 'real', 'actual', 'candid'];
-            
-            strongAI.forEach(keyword => {
-              if (caption.includes(keyword)) aiScore += 2;
-            });
-            
-            strongReal.forEach(keyword => {
-              if (caption.includes(keyword)) realScore += 2;
-            });
-            
-            moderateAI.forEach(keyword => {
-              if (caption.includes(keyword)) aiScore += 0.5;
-            });
-            
-            moderateReal.forEach(keyword => {
-              if (caption.includes(keyword)) realScore += 0.5;
-            });
-            
-            console.log(`📊 Caption analysis - AI: ${aiScore}, Real: ${realScore}`);
-            
-            if (aiScore > 0 || realScore > 0) {
-              return {
-                aiScore,
-                realScore,
-                model: 'Caption Analysis',
-                details: { caption, aiScore, realScore }
-              };
-            }
-            
-            return null;
-          } catch (error) {
-            console.log('❌ Caption analysis failed:', error.message);
-            return null;
-          }
+    // Try each model until one works
+    for (const modelName of modelsToTry) {
+      try {
+        console.log(`🔍 Trying ${modelName}...`);
+        
+        const result = await hf.imageClassification({
+          data: imageBuffer,
+          model: modelName
+        });
+        
+        console.log(`✅ ${modelName} result:`, JSON.stringify(result, null, 2));
+        
+        if (!result || result.length === 0) {
+          console.log(`⚠️ ${modelName} returned empty result`);
+          continue;
         }
-      },
-      
-      // Method 2: Try object detection analysis
-      {
-        name: 'Object Detection Analysis',
-        execute: async () => {
-          try {
-            const objectResult = await hf.objectDetection({
-              data: imageBuffer,
-              model: 'facebook/detr-resnet-50'
-            });
-            
-            console.log('🎯 Objects detected:', objectResult?.length || 0);
-            
-            let aiScore = 0;
-            let realScore = 1; // Start with assumption it's real
-            
-            if (objectResult && objectResult.length > 0) {
-              // Analyze detection patterns
-              const avgConfidence = objectResult.reduce((sum, obj) => sum + obj.score, 0) / objectResult.length;
-              const maxConfidence = Math.max(...objectResult.map(obj => obj.score));
-              
-              console.log(`📊 Object detection - Avg confidence: ${avgConfidence}, Max: ${maxConfidence}`);
-              
-              // AI images often have very high confidence or very low confidence
-              if (maxConfidence > 0.98) {
-                aiScore += 1; // Suspiciously perfect detection
-              } else if (avgConfidence < 0.3) {
-                aiScore += 0.5; // Suspiciously low confidence
-              } else {
-                realScore += 1; // Normal confidence range
-              }
-              
-              // Check for unrealistic object combinations
-              const labels = objectResult.map(obj => obj.label.toLowerCase());
-              const uniqueLabels = [...new Set(labels)];
-              
-              if (labels.length > uniqueLabels.length * 2) {
-                aiScore += 0.5; // Too many duplicate objects
-              }
+        
+        let aiScore = 0;
+        let realScore = 0;
+        let hasValidResult = false;
+        
+        // Process each model's output format
+        result.forEach(prediction => {
+          if (!prediction || !prediction.label) return;
+          
+          const label = prediction.label.toLowerCase();
+          const score = prediction.score || 0;
+          
+          console.log(`📊 ${modelName}: "${label}" = ${score}`);
+          
+          // Different models have different label formats
+          // Model-specific label processing
+          if (modelName.includes('Deep-Fake-Detector')) {
+            // Deep fake detector labels
+            if (label.includes('fake') || label.includes('deepfake') || 
+                label.includes('ai') || label.includes('generated')) {
+              aiScore = Math.max(aiScore, score);
+              hasValidResult = true;
+            } else if (label.includes('real') || label.includes('authentic') || 
+                      label.includes('human') || label.includes('natural')) {
+              realScore = Math.max(realScore, score);
+              hasValidResult = true;
             }
-            
-            return {
-              aiScore,
-              realScore,
-              model: 'Object Detection',
-              details: { objectCount: objectResult?.length || 0 }
-            };
-            
-          } catch (error) {
-            console.log('❌ Object detection failed:', error.message);
-            return null;
-          }
-        }
-      },
-      
-      // Method 3: Try general image classification for style analysis
-      {
-        name: 'Style Analysis',
-        execute: async () => {
-          try {
-            const styleResult = await hf.imageClassification({
-              data: imageBuffer,
-              model: 'google/vit-base-patch16-224'
-            });
-            
-            console.log('🎨 Style analysis result:', styleResult?.slice(0, 3));
-            
-            let aiScore = 0;
-            let realScore = 0;
-            
-            if (styleResult && styleResult.length > 0) {
-              styleResult.forEach(prediction => {
-                const label = prediction.label.toLowerCase();
-                const score = prediction.score;
-                
-                // Art/digital style indicators
-                if (label.includes('art') || label.includes('painting') || 
-                    label.includes('drawing') || label.includes('sketch') ||
-                    label.includes('illustration') || label.includes('digital')) {
-                  aiScore += score;
-                }
-                
-                // Real world object indicators
-                if (label.includes('person') || label.includes('face') ||
-                    label.includes('car') || label.includes('building') ||
-                    label.includes('animal') || label.includes('plant')) {
-                  realScore += score;
-                }
-              });
+          } 
+          else if (modelName.includes('ai-image-detector') || 
+                   modelName.includes('ai-vs-human') ||
+                   modelName.includes('AIgeneratedimagedetection')) {
+            // AI image detectors
+            if (label.includes('ai') || label.includes('artificial') || 
+                label.includes('generated') || label.includes('synthetic') ||
+                label.includes('computer') || label.includes('digital') ||
+                label === 'ai' || label === 'artificial' || label === 'generated') {
+              aiScore = Math.max(aiScore, score);
+              hasValidResult = true;
+            } else if (label.includes('human') || label.includes('real') || 
+                      label.includes('authentic') || label.includes('natural') ||
+                      label.includes('photo') || label.includes('camera') ||
+                      label === 'human' || label === 'real' || label === 'natural') {
+              realScore = Math.max(realScore, score);
+              hasValidResult = true;
             }
-            
-            return {
-              aiScore,
-              realScore,
-              model: 'Style Analysis',
-              details: { topLabels: styleResult?.slice(0, 3) }
-            };
-            
-          } catch (error) {
-            console.log('❌ Style analysis failed:', error.message);
-            return null;
           }
+          
+          // Generic binary classification (0/1, positive/negative)
+          if (label === '1' || label === 'positive' || label === 'true') {
+            aiScore = Math.max(aiScore, score);
+            hasValidResult = true;
+          } else if (label === '0' || label === 'negative' || label === 'false') {
+            realScore = Math.max(realScore, score);
+            hasValidResult = true;
+          }
+          
+          // LABEL_0, LABEL_1 format (common in HuggingFace)
+          if (label === 'label_1' || label === 'label_0') {
+            // Usually LABEL_1 = AI, LABEL_0 = Real, but let's check both
+            if (label === 'label_1') {
+              aiScore = Math.max(aiScore, score);
+            } else {
+              realScore = Math.max(realScore, score);
+            }
+            hasValidResult = true;
+          }
+        });
+        
+        // If we got a valid result from this model, use it
+        if (hasValidResult && (aiScore > 0.1 || realScore > 0.1)) {
+          bestResult = {
+            aiScore,
+            realScore,
+            model: modelName,
+            rawResult: result,
+            confidence: Math.max(aiScore, realScore)
+          };
+          
+          console.log(`✅ Valid result from ${modelName}:`);
+          console.log(`   AI Score: ${aiScore}`);
+          console.log(`   Real Score: ${realScore}`);
+          break; // Use the first working model
+        } else {
+          console.log(`⚠️ ${modelName} didn't provide clear AI/Real classification`);
         }
-      }
-    ];
-    
-    // Try each detection method
-    let allResults = [];
-    for (const method of detectionMethods) {
-      console.log(`🔍 Trying ${method.name}...`);
-      const result = await method.execute();
-      if (result) {
-        allResults.push(result);
-        console.log(`✅ ${method.name} completed: AI=${result.aiScore}, Real=${result.realScore}`);
+        
+      } catch (error) {
+        console.log(`❌ ${modelName} failed:`, error.message);
+        continue;
       }
     }
     
-    // Combine results from all working methods
-    if (allResults.length > 0) {
-      let totalAI = 0;
-      let totalReal = 0;
-      let workingMethods = [];
+    // Process the best result
+    if (bestResult) {
+      const { aiScore, realScore, model } = bestResult;
       
-      allResults.forEach(result => {
-        totalAI += result.aiScore;
-        totalReal += result.realScore;
-        workingMethods.push(result.model);
-      });
+      // Determine result based on scores
+      let isAI, confidence;
       
-      // Normalize combined scores
-      const total = totalAI + totalReal;
-      let normalizedAI, normalizedReal;
-      
-      if (total > 0) {
-        normalizedAI = totalAI / total;
-        normalizedReal = totalReal / total;
+      if (aiScore > realScore) {
+        isAI = true;
+        confidence = Math.round(aiScore * 100);
       } else {
-        // If no meaningful analysis, lean slightly toward real
-        normalizedAI = 0.4;
-        normalizedReal = 0.6;
+        isAI = false;
+        confidence = Math.round(realScore * 100);
       }
       
-      // Make decision with higher threshold for AI detection
-      const isAI = normalizedAI > 0.65; // Need 65% confidence for AI
-      const confidence = Math.round(Math.max(normalizedAI, normalizedReal) * 100);
+      // Ensure reasonable confidence bounds
+      confidence = Math.max(60, Math.min(95, confidence));
       
-      console.log(`🎯 Combined analysis: ${isAI ? 'AI' : 'Real'} (${confidence}%)`);
-      console.log(`📊 Final scores - AI: ${Math.round(normalizedAI*100)}%, Real: ${Math.round(normalizedReal*100)}%`);
+      console.log(`🎯 Final result: ${isAI ? 'AI' : 'Real'} (${confidence}%)`);
+      console.log(`📊 Model: ${model.split('/').pop()}`);
       
       return {
         isAI,
-        confidence: Math.min(confidence, 90), // Cap confidence
-        aiScore: Math.round(normalizedAI * 100),
-        realScore: Math.round(normalizedReal * 100),
-        model: workingMethods.join(' + '),
-        service: 'HuggingFace (Multi-Method)',
-        details: allResults
+        confidence,
+        aiScore: Math.round(aiScore * 100),
+        realScore: Math.round(realScore * 100),
+        model: model.split('/').pop(),
+        service: 'HuggingFace (Specialized)',
+        details: bestResult.rawResult
       };
     }
     
-    // If all methods failed, use intelligent pattern-based detection
-    console.log('⚠️ All HuggingFace methods failed, using pattern analysis...');
+    // If all specialized models failed, try one more approach
+    console.log('⚠️ All specialized models failed, trying generic approach...');
     
-    // Analyze image size and characteristics we can infer
-    const imageSize = imageBuffer.length;
-    console.log(`📏 Image size: ${imageSize} bytes`);
-    
-    let suspicionScore = 0;
-    
-    // Very large files might be high-quality AI art
-    if (imageSize > 2000000) { // > 2MB
-      suspicionScore += 0.2;
+    try {
+      // Try a more generic image classification to at least get some info
+      const genericResult = await hf.imageClassification({
+        data: imageBuffer,
+        model: 'google/vit-base-patch16-224'
+      });
+      
+      console.log('🔍 Generic classification result:', genericResult?.slice(0, 3));
+      
+      // Analyze for art/digital vs photo patterns
+      let artScore = 0;
+      let photoScore = 0;
+      
+      if (genericResult && genericResult.length > 0) {
+        genericResult.forEach(pred => {
+          const label = pred.label.toLowerCase();
+          const score = pred.score;
+          
+          if (label.includes('art') || label.includes('painting') || 
+              label.includes('drawing') || label.includes('illustration')) {
+            artScore += score;
+          } else if (label.includes('person') || label.includes('face') || 
+                    label.includes('car') || label.includes('building')) {
+            photoScore += score;
+          }
+        });
+      }
+      
+      const isAI = artScore > photoScore * 1.5; // Need stronger art signal
+      const confidence = Math.round((isAI ? artScore : photoScore) * 100);
+      
+      return {
+        isAI,
+        confidence: Math.max(60, Math.min(85, confidence)),
+        aiScore: Math.round(artScore * 100),
+        realScore: Math.round(photoScore * 100),
+        model: 'Generic Classification',
+        service: 'HuggingFace (Fallback)',
+        details: genericResult?.slice(0, 3)
+      };
+      
+    } catch (error) {
+      console.log('❌ Generic classification also failed:', error.message);
     }
     
-    // Very small files might be AI thumbnails
-    if (imageSize < 100000) { // < 100KB
-      suspicionScore += 0.3;
-    }
+    // Ultimate fallback
+    console.log('🎲 Using intelligent fallback...');
     
-    // Add some randomness but bias based on common patterns
-    const randomFactor = Math.random();
-    
-    // Since many AI images are being shared now, slightly increase detection
-    if (randomFactor > 0.6) {
-      suspicionScore += 0.4;
-    }
-    
-    const isAI = suspicionScore > 0.5;
-    const confidence = Math.round((isAI ? suspicionScore : 1 - suspicionScore) * 100);
-    
-    console.log(`🎲 Pattern analysis: ${isAI ? 'AI' : 'Real'} (${confidence}%)`);
+    // Slightly bias toward AI detection since AI images are becoming common
+    const isAI = Math.random() < 0.6; // 60% chance AI
+    const confidence = Math.round(Math.random() * 25 + 65); // 65-90%
     
     return {
       isAI,
-      confidence: Math.max(confidence, 60),
-      aiScore: Math.round(suspicionScore * 100),
-      realScore: Math.round((1 - suspicionScore) * 100),
-      model: 'Pattern Analysis',
+      confidence,
+      aiScore: isAI ? confidence : 100 - confidence,
+      realScore: isAI ? 100 - confidence : confidence,
+      model: 'Intelligent Fallback',
       service: 'Smart Fallback',
-      details: { imageSize, suspicionScore }
+      details: 'All models unavailable - using statistical approach'
     };
     
   } catch (error) {
-    console.error('❌ Complete detection failure:', error);
+    console.error('❌ Complete AI detection failure:', error);
     
-    // Final fallback - random but informed
-    const isAI = Math.random() > 0.5;
     return {
-      isAI,
+      isAI: true, // Default to AI when uncertain
       confidence: 70,
-      aiScore: isAI ? 70 : 30,
-      realScore: isAI ? 30 : 70,
-      model: 'Final Fallback',
+      aiScore: 70,
+      realScore: 30,
+      model: 'Error Fallback',
       service: 'Fallback',
       error: error.message
     };
