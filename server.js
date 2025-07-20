@@ -2,18 +2,15 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const { HfInference } = require('@huggingface/inference');
 
 const app = express();
 app.use(express.json());
-
-// Initialize HuggingFace client
-const hf = new HfInference(process.env.HUGGINGFACE_TOKEN);
 
 // Configuration
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const HUGGINGFACE_TOKEN = process.env.HUGGINGFACE_TOKEN;
 
 // Working AI Detection Models (Verified to support Inference API)
 const AI_DETECTION_MODELS = {
@@ -185,24 +182,11 @@ async function handleTextMessage(message, fromNumber) {
   }
 }
 
-// AI Detection using verified working models
+// AI Detection using verified working models (Direct HTTP API)
 async function detectAIWithHuggingFace(imageBuffer) {
   try {
     console.log('🤖 Running AI detection with 3 verified working models...');
     console.log('📏 Image buffer size:', imageBuffer.length, 'bytes');
-    
-    // Test if HuggingFace connection works at all
-    try {
-      console.log('🧪 Testing HuggingFace connection...');
-      const testConnection = await hf.imageClassification({
-        data: imageBuffer,
-        model: 'google/vit-base-patch16-224'
-      });
-      console.log('✅ HuggingFace connection working:', testConnection?.length || 0, 'results');
-    } catch (testError) {
-      console.log('❌ HuggingFace connection test failed:', testError.message);
-      // Continue anyway, might be model-specific issue
-    }
     
     const workingModels = [
       'haywoodsloan/ai-image-detector-deploy',
@@ -212,16 +196,24 @@ async function detectAIWithHuggingFace(imageBuffer) {
     
     let bestResult = null;
     
-    // Try each working model
+    // Try each working model using direct HTTP API
     for (const modelName of workingModels) {
       try {
         console.log(`🔍 Trying ${modelName}...`);
         
-        const result = await hf.imageClassification({
-          data: imageBuffer,
-          model: modelName
-        });
+        const response = await axios.post(
+          `https://api-inference.huggingface.co/models/${modelName}`,
+          imageBuffer,
+          {
+            headers: {
+              'Authorization': `Bearer ${HUGGINGFACE_TOKEN}`,
+              'Content-Type': 'application/octet-stream'
+            },
+            timeout: 30000
+          }
+        );
         
+        const result = response.data;
         console.log(`✅ ${modelName} result:`, JSON.stringify(result, null, 2));
         
         if (!result) {
@@ -421,11 +413,19 @@ async function detectAIWithHuggingFace(imageBuffer) {
     
     try {
       // Use a general image classifier as fallback
-      const backupResult = await hf.imageClassification({
-        data: imageBuffer,
-        model: 'google/vit-base-patch16-224'
-      });
+      const backupResponse = await axios.post(
+        'https://api-inference.huggingface.co/models/google/vit-base-patch16-224',
+        imageBuffer,
+        {
+          headers: {
+            'Authorization': `Bearer ${HUGGINGFACE_TOKEN}`,
+            'Content-Type': 'application/octet-stream'
+          },
+          timeout: 30000
+        }
+      );
       
+      const backupResult = backupResponse.data;
       console.log('🔄 Backup classification result:', backupResult?.slice(0, 3));
       
       // Analyze for artistic vs photographic content
