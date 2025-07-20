@@ -53,7 +53,19 @@ app.post('/webhook', async (req, res) => {
           if (change.field === 'messages' && change.value.messages) {
             for (const message of change.value.messages) {
               await handleIncomingMessage(message, change.value);
+            // legekka/AI-Anime-Image-Detector-ViT analysis
+          if (modelName.includes('legekka')) {
+            // This model is specialized for anime/cartoon AI detection
+            if (label === 'ai' || label === 'ai-generated' || label === 'artificial' || 
+                label === 'generated' || label === 'synthetic' || label.includes('ai')) {
+              aiScore = Math.max(aiScore, score);
+              hasValidResult = true;
+            } else if (label === 'real' || label === 'human' || label === 'authentic' || 
+                      label === 'hand-drawn' || label === 'traditional' || label.includes('real')) {
+              realScore = Math.max(realScore, score);
+              hasValidResult = true;
             }
+          }
           }
         }
       }
@@ -190,6 +202,20 @@ async function handleTextMessage(message, fromNumber) {
 async function detectAIWithHuggingFace(imageBuffer) {
   try {
     console.log('🤖 Running AI detection with 3 verified working models...');
+    console.log('📏 Image buffer size:', imageBuffer.length, 'bytes');
+    
+    // Test if HuggingFace connection works at all
+    try {
+      console.log('🧪 Testing HuggingFace connection...');
+      const testConnection = await hf.imageClassification({
+        data: imageBuffer,
+        model: 'google/vit-base-patch16-224'
+      });
+      console.log('✅ HuggingFace connection working:', testConnection?.length || 0, 'results');
+    } catch (testError) {
+      console.log('❌ HuggingFace connection test failed:', testError.message);
+      // Continue anyway, might be model-specific issue
+    }
     
     const workingModels = [
       'haywoodsloan/ai-image-detector-deploy',
@@ -211,8 +237,18 @@ async function detectAIWithHuggingFace(imageBuffer) {
         
         console.log(`✅ ${modelName} result:`, JSON.stringify(result, null, 2));
         
-        if (!result || result.length === 0) {
-          console.log(`⚠️ ${modelName} returned empty result`);
+        if (!result) {
+          console.log(`⚠️ ${modelName} returned null/undefined`);
+          continue;
+        }
+        
+        if (!Array.isArray(result)) {
+          console.log(`⚠️ ${modelName} didn't return an array:`, typeof result);
+          continue;
+        }
+        
+        if (result.length === 0) {
+          console.log(`⚠️ ${modelName} returned empty array`);
           continue;
         }
         
@@ -222,9 +258,17 @@ async function detectAIWithHuggingFace(imageBuffer) {
         
         // Process the model results
         result.forEach(prediction => {
-          if (!prediction || !prediction.label) return;
+          if (!prediction) {
+            console.log(`⚠️ Prediction is null/undefined`);
+            return;
+          }
           
-          const label = prediction.label.toLowerCase();
+          if (!prediction.label) {
+            console.log(`⚠️ Prediction has no label:`, prediction);
+            return;
+          }
+          
+          const label = String(prediction.label).toLowerCase();
           const score = prediction.score || 0;
           
           console.log(`📊 ${modelName}: "${label}" = ${score}`);
@@ -327,6 +371,7 @@ async function detectAIWithHuggingFace(imageBuffer) {
         
       } catch (error) {
         console.log(`❌ ${modelName} failed:`, error.message);
+        console.log(`❌ ${modelName} error details:`, error);
         continue;
       }
     }
@@ -379,10 +424,12 @@ async function detectAIWithHuggingFace(imageBuffer) {
       let artScore = 0;
       let photoScore = 0;
       
-      if (backupResult && backupResult.length > 0) {
+      if (backupResult && Array.isArray(backupResult) && backupResult.length > 0) {
         backupResult.forEach(pred => {
-          const label = pred.label.toLowerCase();
-          const score = pred.score;
+          if (!pred || !pred.label) return;
+          
+          const label = String(pred.label).toLowerCase();
+          const score = pred.score || 0;
           
           // Artistic/digital indicators
           if (label.includes('art') || label.includes('painting') || 
