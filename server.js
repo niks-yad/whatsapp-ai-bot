@@ -53,20 +53,7 @@ app.post('/webhook', async (req, res) => {
           if (change.field === 'messages' && change.value.messages) {
             for (const message of change.value.messages) {
               await handleIncomingMessage(message, change.value);
-            // legekka/AI-Anime-Image-Detector-ViT analysis
-          if (modelName.includes('legekka')) {
-            // This model is specialized for anime/cartoon AI detection
-            if (label === 'ai' || label === 'ai-generated' || label === 'artificial' || 
-                label === 'generated' || label === 'synthetic' || label.includes('ai')) {
-              aiScore = Math.max(aiScore, score);
-              hasValidResult = true;
-            } else if (label === 'real' || label === 'human' || label === 'authentic' || 
-                      label === 'hand-drawn' || label === 'traditional' || label.includes('real')) {
-              realScore = Math.max(realScore, score);
-              hasValidResult = true;
             }
-          }
-          }
         }
       }
     }
@@ -263,12 +250,19 @@ async function detectAIWithHuggingFace(imageBuffer) {
             return;
           }
           
-          if (!prediction.label) {
+          if (!prediction.label || prediction.label === null || prediction.label === undefined) {
             console.log(`⚠️ Prediction has no label:`, prediction);
             return;
           }
           
-          const label = String(prediction.label).toLowerCase();
+          let label;
+          try {
+            label = String(prediction.label).toLowerCase();
+          } catch (error) {
+            console.log(`⚠️ Error converting label to string:`, prediction.label, error);
+            return;
+          }
+          
           const score = prediction.score || 0;
           
           console.log(`📊 ${modelName}: "${label}" = ${score}`);
@@ -300,6 +294,20 @@ async function detectAIWithHuggingFace(imageBuffer) {
                       label.includes('authentic') || label.includes('natural') ||
                       label.includes('photo') || label.includes('camera') ||
                       label === 'human' || label === 'real' || label === 'natural') {
+              realScore = Math.max(realScore, score);
+              hasValidResult = true;
+            }
+          }
+          
+          // legekka/AI-Anime-Image-Detector-ViT analysis
+          if (modelName.includes('legekka')) {
+            // This model is specialized for anime/cartoon AI detection
+            if (label === 'ai' || label === 'ai-generated' || label === 'artificial' || 
+                label === 'generated' || label === 'synthetic' || label.includes('ai')) {
+              aiScore = Math.max(aiScore, score);
+              hasValidResult = true;
+            } else if (label === 'real' || label === 'human' || label === 'authentic' || 
+                      label === 'hand-drawn' || label === 'traditional' || label.includes('real')) {
               realScore = Math.max(realScore, score);
               hasValidResult = true;
             }
