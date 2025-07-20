@@ -53,19 +53,7 @@ app.post('/webhook', async (req, res) => {
           if (change.field === 'messages' && change.value.messages) {
             for (const message of change.value.messages) {
               await handleIncomingMessage(message, change.value);
-            // legekka/AI-Anime-Image-Detector-ViT analysis
-          if (modelName.includes('legekka')) {
-            // This model is specialized for anime/cartoon AI detection
-            if (label === 'ai' || label === 'ai-generated' || label === 'artificial' || 
-                label === 'generated' || label === 'synthetic' || label.includes('ai')) {
-              aiScore = Math.max(aiScore, score);
-              hasValidResult = true;
-            } else if (label === 'real' || label === 'human' || label === 'authentic' || 
-                      label === 'hand-drawn' || label === 'traditional' || label.includes('real')) {
-              realScore = Math.max(realScore, score);
-              hasValidResult = true;
             }
-          }
           }
         }
       }
