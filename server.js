@@ -72,7 +72,7 @@ app.post('/webhook', async (req, res) => {
     }
 
     res.status(200).send('OK');
-  } catch (error) {
+  }} catch (error) {
     console.error('❌ Webhook error:', error);
     res.status(500).send('Error processing webhook');
   }
