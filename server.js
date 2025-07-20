@@ -567,6 +567,17 @@ function updateAnalytics(phoneNumber, mediaType, detection) {
   }
 }
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    message: '🤖 WhatsApp AI Detection Bot',
+    status: 'running',
+    timestamp: new Date().toISOString(),
+    webhook: '/webhook',
+    health: '/health'
+  });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ 
