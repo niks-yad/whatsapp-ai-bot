@@ -6,6 +6,7 @@ const twilio = require('twilio');
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Configuration
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
@@ -70,6 +71,11 @@ app.post('/webhook', async (req, res) => {
 app.post('/twilio-webhook', async (req, res) => {
   try {
     const { From, To, Body, MediaUrl0, MessageSid } = req.body;
+    
+    // Validate required fields
+    if (!From) {
+      return res.status(400).send('Missing From parameter');
+    }
     
     // Create a simulated message object similar to WhatsApp format
     const simulatedMessage = {
