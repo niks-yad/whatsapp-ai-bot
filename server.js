@@ -2,6 +2,7 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
+const twilio = require('twilio');
 
 const app = express();
 app.use(express.json());
@@ -11,6 +12,14 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const HUGGINGFACE_TOKEN = process.env.HUGGINGFACE_TOKEN;
+
+// Twilio Configuration
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
+
+const twilioClient = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN ? 
+  twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) : null;
 
 // AI Detection Models
 const AI_MODELS = [
@@ -57,6 +66,37 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+// Twilio SMS/WhatsApp webhook
+app.post('/twilio-webhook', async (req, res) => {
+  try {
+    const { From, To, Body, MediaUrl0, MessageSid } = req.body;
+    
+    // Create a simulated message object similar to WhatsApp format
+    const simulatedMessage = {
+      from: From.replace(/^whatsapp:/, '').replace(/^\+/, ''),
+      type: MediaUrl0 ? 'image' : 'text',
+      timestamp: Math.floor(Date.now() / 1000).toString()
+    };
+
+    if (MediaUrl0) {
+      simulatedMessage.image = { 
+        id: MessageSid,
+        url: MediaUrl0
+      };
+    } else if (Body) {
+      simulatedMessage.text = { body: Body };
+    }
+
+    // Process the message using existing logic
+    await handleTwilioMessage(simulatedMessage, From);
+    
+    res.status(200).send('OK');
+  } catch (error) {
+    console.error('❌ Twilio webhook error:', error);
+    res.status(500).send('Error');
+  }
+});
+
 // Handle incoming messages
 async function handleMessage(message, value) {
   const fromNumber = message.from;
@@ -76,6 +116,33 @@ async function handleMessage(message, value) {
   } catch (error) {
     console.error('❌ Error handling message:', error);
     await sendText(fromNumber, "🚫 Something went wrong. Please try again.");
+  }
+}
+
+// Handle Twilio messages
+async function handleTwilioMessage(message, fromNumber) {
+  updateUserStats(fromNumber);
+  
+  try {
+    switch (message.type) {
+      case 'image':
+        await handleTwilioImage(message, fromNumber);
+        break;
+      case 'text':
+        await handleTwilioText(message, fromNumber);
+        break;
+      default:
+        await sendTwilioMessage(fromNumber, 
+          "🤖 *Welcome to AI Detection Bot!*\n\n" +
+          "📸 Send me images and I'll detect if they're AI-generated!\n\n" +
+          "💡 Commands:\n" +
+          "• 'help' - More info\n" +
+          "• 'stats' - Your usage\n\n" +
+          "🚀 Just send your image to get started!");
+    }
+  } catch (error) {
+    console.error('❌ Error handling Twilio message:', error);
+    await sendTwilioMessage(fromNumber, "🚫 Something went wrong. Please try again.");
   }
 }
 
@@ -115,6 +182,63 @@ async function handleText(message, fromNumber) {
     await sendStats(fromNumber);
   } else {
     await sendWelcome(fromNumber);
+  }
+}
+
+// Handle Twilio image messages
+async function handleTwilioImage(message, fromNumber) {
+  try {
+    let imageBuffer;
+    
+    if (message.image.url) {
+      // Direct URL from Twilio
+      const response = await axios.get(message.image.url, {
+        responseType: 'arraybuffer'
+      });
+      imageBuffer = Buffer.from(response.data);
+    } else {
+      // Fallback to original WhatsApp method
+      const mediaUrl = await getMediaUrl(message.image.id);
+      imageBuffer = await downloadMedia(mediaUrl);
+    }
+    
+    const detection = await detectAI(imageBuffer);
+    
+    if (detection.error) {
+      await sendTwilioMessage(fromNumber, 
+        "🚫 *AI Detection Temporarily Unavailable*\n\n" +
+        "⚠️ Our AI models are currently down.\n" +
+        "🔧 We're working to fix this ASAP.\n\n" +
+        "⏰ Please try again in a few minutes."
+      );
+      return;
+    }
+    
+    await sendTwilioResult(fromNumber, detection);
+    updateAnalytics(fromNumber, 'image', detection);
+    
+  } catch (error) {
+    console.error('❌ Twilio image error:', error);
+    await sendTwilioMessage(fromNumber, "🖼️ Couldn't analyze this image. Try a different format.");
+  }
+}
+
+// Handle Twilio text messages
+async function handleTwilioText(message, fromNumber) {
+  const text = message.text.body.toLowerCase().trim();
+  
+  if (text.includes('help')) {
+    await sendTwilioHelp(fromNumber);
+  } else if (text.includes('stats')) {
+    await sendTwilioStats(fromNumber);
+  } else {
+    await sendTwilioMessage(fromNumber,
+      "🤖 *Welcome to AI Detection Bot!*\n\n" +
+      "📸 Send me images and I'll detect if they're AI-generated!\n\n" +
+      "💡 Commands:\n" +
+      "• 'help' - More info\n" +
+      "• 'stats' - Your usage\n\n" +
+      "🚀 Just send your image to get started!");
   }
 }
 
@@ -302,6 +426,90 @@ async function sendText(toNumber, message) {
   } catch (error) {
     console.error('❌ Error sending message:', error.response?.data || error.message);
   }
+}
+
+// Send Twilio message
+async function sendTwilioMessage(toNumber, message) {
+  if (!twilioClient) {
+    console.error('❌ Twilio client not configured');
+    return;
+  }
+
+  try {
+    await twilioClient.messages.create({
+      body: message,
+      from: TWILIO_PHONE_NUMBER,
+      to: toNumber
+    });
+  } catch (error) {
+    console.error('❌ Error sending Twilio message:', error.message);
+  }
+}
+
+// Send Twilio detection results
+async function sendTwilioResult(toNumber, detection) {
+  const emoji = detection.isAI ? "🤖" : "✅";
+  const status = detection.isAI ? "AI-Generated" : "Authentic";
+  const confidenceBar = '█'.repeat(Math.round(detection.confidence / 10)) + 
+                       '░'.repeat(10 - Math.round(detection.confidence / 10));
+  
+  const message = 
+    `${emoji} *${status.toUpperCase()}*\n\n` +
+    `📊 Confidence: ${detection.confidence}%\n` +
+    `[${confidenceBar}]\n\n` +
+    `${detection.isAI ? 
+      "🤖 This appears to be AI-generated content" : 
+      "✅ This appears to be authentic content"}\n\n` +
+    `📊 AI Score: ${detection.aiScore}% | Real Score: ${detection.realScore}%\n` +
+    `🔧 Model: ${detection.model}\n\n` +
+    `📸 Send another image to analyze more!`;
+
+  await sendTwilioMessage(toNumber, message);
+}
+
+// Send Twilio help message
+async function sendTwilioHelp(toNumber) {
+  const message = 
+    "🆘 *AI Detection Bot Help*\n\n" +
+    "*How to use:*\n" +
+    "1. Send any image\n" +
+    "2. Get instant AI detection results\n" +
+    "3. See confidence scores\n\n" +
+    "*Commands:*\n" +
+    "• 'help' - This message\n" +
+    "• 'stats' - Usage statistics\n\n" +
+    "*What I detect:*\n" +
+    "• AI-generated images\n" +
+    "• Deepfakes\n" +
+    "• Synthetic media\n\n" +
+    "🔬 Powered by HuggingFace AI models!";
+
+  await sendTwilioMessage(toNumber, message);
+}
+
+// Send Twilio user statistics
+async function sendTwilioStats(toNumber) {
+  const stats = userStats.get(toNumber) || { 
+    messagesCount: 0, 
+    imagesAnalyzed: 0, 
+    aiDetected: 0,
+    joinDate: new Date() 
+  };
+  
+  const daysSince = Math.floor((new Date() - stats.joinDate) / (1000 * 60 * 60 * 24));
+  const aiPercentage = stats.imagesAnalyzed > 0 ? 
+    Math.round((stats.aiDetected / stats.imagesAnalyzed) * 100) : 0;
+  
+  const message = 
+    "📊 *Your Statistics*\n\n" +
+    `👤 Member for: ${daysSince} days\n` +
+    `💬 Messages: ${stats.messagesCount}\n` +
+    `📸 Images analyzed: ${stats.imagesAnalyzed}\n` +
+    `🤖 AI detected: ${stats.aiDetected}\n` +
+    `📈 AI detection rate: ${aiPercentage}%\n\n` +
+    "📱 Send more images to analyze!";
+
+  await sendTwilioMessage(toNumber, message);
 }
 
 // Update user statistics
