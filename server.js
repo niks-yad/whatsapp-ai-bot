@@ -101,6 +101,10 @@ app.post('/twilio-webhook', async (req, res) => {
     }
 
     console.log('🚀 Calling handleTwilioMessage...');
+    
+    // Quick test - send immediate response
+    await sendTwilioMessage(From, "🤖 Bot received your message!");
+    
     // Process the message using existing logic (keep original From format)
     await handleTwilioMessage(simulatedMessage, From);
     
@@ -451,16 +455,33 @@ async function sendTwilioMessage(toNumber, message) {
   }
 
   try {
-    // Match the channel format (SMS vs WhatsApp)
-    const fromNumber = toNumber.startsWith('whatsapp:') 
-      ? `whatsapp:${TWILIO_PHONE_NUMBER.replace(/^whatsapp:/, '')}`
+    // Clean and format phone numbers properly
+    let cleanToNumber = toNumber;
+    
+    // Fix common formatting issues
+    if (toNumber.includes('whatsapp:')) {
+      // Extract number and ensure it has +
+      let number = toNumber.replace('whatsapp:', '').trim();
+      if (!number.startsWith('+')) {
+        number = '+' + number;
+      }
+      cleanToNumber = 'whatsapp:' + number;
+    }
+    
+    // Match the channel format (SMS vs WhatsApp)  
+    const fromNumber = cleanToNumber.startsWith('whatsapp:') 
+      ? `whatsapp:${TWILIO_PHONE_NUMBER.replace(/^whatsapp:/, '').replace(/^\+/, '')}`
       : TWILIO_PHONE_NUMBER.replace(/^whatsapp:/, '');
+
+    console.log(`📤 Sending message from ${fromNumber} to ${cleanToNumber}`);
 
     await twilioClient.messages.create({
       body: message,
       from: fromNumber,
-      to: toNumber
+      to: cleanToNumber
     });
+    
+    console.log('✅ Message sent successfully');
   } catch (error) {
     console.error('❌ Error sending Twilio message:', error.message);
   }
