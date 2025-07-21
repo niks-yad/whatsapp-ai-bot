@@ -208,9 +208,13 @@ async function handleTwilioImage(message, fromNumber) {
     let imageBuffer;
     
     if (message.image.url) {
-      // Direct URL from Twilio
+      // Direct URL from Twilio - requires authentication
       const response = await axios.get(message.image.url, {
-        responseType: 'arraybuffer'
+        responseType: 'arraybuffer',
+        auth: {
+          username: TWILIO_ACCOUNT_SID,
+          password: TWILIO_AUTH_TOKEN
+        }
       });
       imageBuffer = Buffer.from(response.data);
     } else {
