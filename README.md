@@ -1,3 +1,5 @@
+![WhatsApp AI Bot](whatsapp-ai-bot.png)
+
 WhatsApp AI Detection Bot - Self-Hosted Deployment & Scaling
 
 🚀 Project Status: Scaling for Production
