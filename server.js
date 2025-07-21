@@ -102,11 +102,9 @@ app.post('/twilio-webhook', async (req, res) => {
 
     console.log('🚀 Calling handleTwilioMessage...');
     
-    // Quick test - send immediate response
-    await sendTwilioMessage(From, "🤖 Bot received your message!");
-    
-    // Process the message using existing logic (keep original From format)
-    await handleTwilioMessage(simulatedMessage, From);
+    // Process the message using existing logic (keep original From format)  
+    // Also pass the To field so we know which number to reply from
+    await handleTwilioMessage(simulatedMessage, From, To);
     
     console.log('✅ Message processed successfully');
     res.status(200).send('OK');
@@ -450,7 +448,12 @@ async function sendText(toNumber, message) {
 // Send Twilio message
 async function sendTwilioMessage(toNumber, message) {
   if (!twilioClient) {
-    console.error('❌ Twilio client not configured');
+    console.error('❌ Twilio client not configured - check TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN');
+    return;
+  }
+
+  if (!TWILIO_PHONE_NUMBER) {
+    console.error('❌ TWILIO_PHONE_NUMBER not configured in environment variables');
     return;
   }
 
@@ -474,6 +477,7 @@ async function sendTwilioMessage(toNumber, message) {
       : TWILIO_PHONE_NUMBER.replace(/^whatsapp:/, '');
 
     console.log(`📤 Sending message from ${fromNumber} to ${cleanToNumber}`);
+    console.log(`🔧 Using TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}`);
 
     await twilioClient.messages.create({
       body: message,
@@ -484,6 +488,21 @@ async function sendTwilioMessage(toNumber, message) {
     console.log('✅ Message sent successfully');
   } catch (error) {
     console.error('❌ Error sending Twilio message:', error.message);
+    
+    // Specific error handling
+    if (error.message.includes('Channel with the specified From address')) {
+      console.error('💡 Fix: Update TWILIO_PHONE_NUMBER to match your Twilio number');
+      console.error('💡 Current configured number:', TWILIO_PHONE_NUMBER);
+      console.error('💡 Make sure it matches your Twilio console configuration');
+    }
+    
+    if (error.message.includes('same To and From')) {
+      console.error('💡 Fix: Cannot send message to the same number (testing limitation)');
+    }
+    
+    if (error.message.includes('not a valid phone number')) {
+      console.error('💡 Fix: Check phone number format - should include country code with +');
+    }
   }
 }
 
