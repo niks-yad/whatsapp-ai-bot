@@ -93,7 +93,7 @@ app.post('/twilio-webhook', async (req, res) => {
       simulatedMessage.text = { body: Body };
     }
 
-    // Process the message using existing logic
+    // Process the message using existing logic (keep original From format)
     await handleTwilioMessage(simulatedMessage, From);
     
     res.status(200).send('OK');
@@ -442,9 +442,14 @@ async function sendTwilioMessage(toNumber, message) {
   }
 
   try {
+    // Match the channel format (SMS vs WhatsApp)
+    const fromNumber = toNumber.startsWith('whatsapp:') 
+      ? `whatsapp:${TWILIO_PHONE_NUMBER.replace(/^whatsapp:/, '')}`
+      : TWILIO_PHONE_NUMBER.replace(/^whatsapp:/, '');
+
     await twilioClient.messages.create({
       body: message,
-      from: TWILIO_PHONE_NUMBER,
+      from: fromNumber,
       to: toNumber
     });
   } catch (error) {
