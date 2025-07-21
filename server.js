@@ -70,12 +70,17 @@ app.post('/webhook', async (req, res) => {
 // Twilio SMS/WhatsApp webhook
 app.post('/twilio-webhook', async (req, res) => {
   try {
+    console.log('🔄 Twilio webhook received:', req.body);
+    
     const { From, To, Body, MediaUrl0, MessageSid } = req.body;
     
     // Validate required fields
     if (!From) {
+      console.log('❌ Missing From parameter');
       return res.status(400).send('Missing From parameter');
     }
+    
+    console.log(`📱 Processing message from ${From}, Body: ${Body}, Media: ${MediaUrl0}`);
     
     // Create a simulated message object similar to WhatsApp format
     const simulatedMessage = {
@@ -89,13 +94,17 @@ app.post('/twilio-webhook', async (req, res) => {
         id: MessageSid,
         url: MediaUrl0
       };
+      console.log('🖼️ Image message detected');
     } else if (Body) {
       simulatedMessage.text = { body: Body };
+      console.log('💬 Text message detected');
     }
 
+    console.log('🚀 Calling handleTwilioMessage...');
     // Process the message using existing logic (keep original From format)
     await handleTwilioMessage(simulatedMessage, From);
     
+    console.log('✅ Message processed successfully');
     res.status(200).send('OK');
   } catch (error) {
     console.error('❌ Twilio webhook error:', error);
