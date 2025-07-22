@@ -1,6 +1,6 @@
 # WhatsApp AI Detection Bot - Self-Hosted Deployment & Scaling
 
-![WhatsApp AI Bot](https://raw.githubusercontent.com/niks-yad/whatsapp-ai-bot/main/whatsapp-ai-bot.png)
+![WhatsApp AI Bot](https://raw.githubusercontent.com/niks-yad/whatsapp-ai-bot/main/bot-demo-qr.png)
 
 🚀 **Project Status: Scaling for Production**
 
