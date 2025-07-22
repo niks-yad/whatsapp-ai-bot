@@ -2,6 +2,6 @@
 
 ![WhatsApp AI Bot](https://raw.githubusercontent.com/niks-yad/whatsapp-ai-bot/main/bot-demo-qr.png)
 
-🚀 **Project Status: Scaling for Production**
+How to use: Scan the QR or directly message on the given number, and send the join code (join warm-white), followed by a "Hi".
 
-Currently migrating from cloud-hosted Render instance to self-hosted infrastructure due to performance limitations. Render free tier drops requests beyond 10 simultaneous users — scaling to handle 100+ concurrent users with proper CI/CD pipeline.
+🚀 **Project Status: Scaling for Production**
