@@ -110,7 +110,8 @@ app.post('/twilio-webhook', async (req, res) => {
         id: MessageSid,
         url: MediaUrl0
       };
-      console.log('🖼️ Image message detected');
+      console.log('🖼️ Image message detected, URL:', MediaUrl0);
+      console.log('🔑 Will authenticate with Twilio credentials for download');
     } else if (Body) {
       simulatedMessage.text = { body: Body };
       console.log('💬 Text message detected');
@@ -332,7 +333,14 @@ async function handleTwilioImage(message, fromNumber) {
   try {
     let imageBuffer;
     
-    if (message.image.url) {
+    console.log('🖼️ Processing Twilio image message:', {
+      hasUrl: !!message.image?.url,
+      hasId: !!message.image?.id,
+      messageStructure: Object.keys(message)
+    });
+    
+    if (message.image && message.image.url) {
+      console.log('📥 Downloading image from Twilio URL...');
       // Direct URL from Twilio - requires authentication
       const response = await axios.get(message.image.url, {
         responseType: 'arraybuffer',
@@ -342,10 +350,19 @@ async function handleTwilioImage(message, fromNumber) {
         }
       });
       imageBuffer = Buffer.from(response.data);
-    } else {
+      console.log(`✅ Downloaded ${imageBuffer.length} bytes from Twilio`);
+      
+      // Debug: Check what we actually downloaded
+      const firstBytes = Array.from(imageBuffer.slice(0, 10)).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(' ');
+      console.log(`🔍 Downloaded data starts with: ${firstBytes}`);
+    } else if (message.image && message.image.id) {
+      console.log('📥 Downloading image via WhatsApp Media API...');
       // Fallback to original WhatsApp method
       const mediaUrl = await getMediaUrl(message.image.id);
       imageBuffer = await downloadMedia(mediaUrl);
+      console.log(`✅ Downloaded ${imageBuffer.length} bytes from WhatsApp`);
+    } else {
+      throw new Error('No image URL or ID found in message');
     }
     
     const detection = await detectAI(imageBuffer);
@@ -392,9 +409,48 @@ async function handleTwilioText(message, fromNumber) {
   }
 }
 
+// Validate image buffer format
+function validateImageBuffer(imageBuffer) {
+  if (!imageBuffer || imageBuffer.length === 0) {
+    return { valid: false, error: 'Empty image buffer' };
+  }
+  
+  // Check for common image file signatures
+  const signatures = {
+    'JPEG': [0xFF, 0xD8, 0xFF],
+    'PNG': [0x89, 0x50, 0x4E, 0x47],
+    'GIF': [0x47, 0x49, 0x46],
+    'WebP': [0x52, 0x49, 0x46, 0x46] // RIFF (WebP container)
+  };
+  
+  for (const [format, signature] of Object.entries(signatures)) {
+    if (signature.every((byte, index) => imageBuffer[index] === byte)) {
+      return { valid: true, format };
+    }
+  }
+  
+  return { valid: false, error: 'Unsupported image format (need JPEG, PNG, GIF, or WebP)' };
+}
+
 // AI Detection
 async function detectAI(imageBuffer) {
   try {
+    // Validate image buffer before sending to API
+    const validation = validateImageBuffer(imageBuffer);
+    if (!validation.valid) {
+      console.log('❌ Image validation failed:', validation.error);
+      return {
+        error: true,
+        message: validation.error
+      };
+    }
+    
+    console.log(`✅ Image validated as ${validation.format} format, size: ${imageBuffer.length} bytes`);
+    
+    // Debug: Show first few bytes
+    const firstBytes = Array.from(imageBuffer.slice(0, 10)).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(' ');
+    console.log(`🔍 First bytes: ${firstBytes}`);
+    
     for (const modelName of AI_MODELS) {
       try {
         const response = await axios.post(

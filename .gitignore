@@ -2,6 +2,7 @@ node_modules/
 .env
 *.log
 .gitignore
+test_vid.MP4
 
 # Documentation backups
 README.md
