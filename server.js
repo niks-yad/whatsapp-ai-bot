@@ -98,19 +98,45 @@ app.post('/twilio-webhook', async (req, res) => {
     
     console.log(`📱 Processing message from ${From}, Body: ${Body}, Media: ${MediaUrl0}`);
     
+    // Destructure additional fields for media type detection
+    const { MediaContentType0, MessageType } = req.body;
+    
+    // Determine message type based on media content type
+    let messageType = 'text';
+    if (MediaUrl0 && MediaContentType0) {
+      if (MediaContentType0.startsWith('image/')) {
+        messageType = 'image';
+      } else if (MediaContentType0.startsWith('video/')) {
+        messageType = 'video';
+      }
+    } else if (MessageType === 'video') {
+      messageType = 'video';
+    } else if (MessageType === 'image') {
+      messageType = 'image';
+    }
+    
     // Create a simulated message object similar to WhatsApp format
     const simulatedMessage = {
       from: From.replace(/^whatsapp:/, '').replace(/^\+/, ''),
-      type: MediaUrl0 ? 'image' : 'text',
+      type: messageType,
       timestamp: Math.floor(Date.now() / 1000).toString()
     };
 
-    if (MediaUrl0) {
+    if (messageType === 'video') {
+      simulatedMessage.video = { 
+        id: MessageSid,
+        url: MediaUrl0
+      };
+      console.log('🎥 Video message detected, URL:', MediaUrl0);
+      console.log('📋 Content Type:', MediaContentType0);
+      console.log('🔑 Will authenticate with Twilio credentials for download');
+    } else if (messageType === 'image') {
       simulatedMessage.image = { 
         id: MessageSid,
         url: MediaUrl0
       };
       console.log('🖼️ Image message detected, URL:', MediaUrl0);
+      console.log('📋 Content Type:', MediaContentType0);
       console.log('🔑 Will authenticate with Twilio credentials for download');
     } else if (Body) {
       simulatedMessage.text = { body: Body };
@@ -121,7 +147,7 @@ app.post('/twilio-webhook', async (req, res) => {
     
     // Process the message using existing logic (keep original From format)  
     // Also pass the To field so we know which number to reply from
-    await handleTwilioMessage(simulatedMessage, From, To);
+    await handleTwilioMessage(simulatedMessage, From);
     
     console.log('✅ Message processed successfully');
     res.status(200).send('OK');
@@ -409,27 +435,58 @@ async function handleTwilioText(message, fromNumber) {
   }
 }
 
-// Validate image buffer format
-function validateImageBuffer(imageBuffer) {
-  if (!imageBuffer || imageBuffer.length === 0) {
-    return { valid: false, error: 'Empty image buffer' };
+// Validate media buffer format (images and videos)
+function validateMediaBuffer(mediaBuffer, expectedType = 'image') {
+  if (!mediaBuffer || mediaBuffer.length === 0) {
+    return { valid: false, error: 'Empty media buffer' };
   }
   
-  // Check for common image file signatures
+  // Check for common file signatures
   const signatures = {
+    // Image formats
     'JPEG': [0xFF, 0xD8, 0xFF],
     'PNG': [0x89, 0x50, 0x4E, 0x47],
     'GIF': [0x47, 0x49, 0x46],
-    'WebP': [0x52, 0x49, 0x46, 0x46] // RIFF (WebP container)
+    'WebP': [0x52, 0x49, 0x46, 0x46], // RIFF (WebP container)
+    
+    // Video formats
+    'MP4': [0x00, 0x00, 0x00], // Check first 3 bytes, then check for 'ftyp' at position 4
+    'MOV': [0x00, 0x00, 0x00], // QuickTime format (similar to MP4)
+    'AVI': [0x52, 0x49, 0x46, 0x46], // RIFF format
   };
   
+  // Special check for MP4/MOV files (they have variable headers)
+  if (mediaBuffer.length >= 12) {
+    // Check for MP4/MOV signature: first 4 bytes are size, next 4 are 'ftyp', then brand
+    const ftypCheck = mediaBuffer.slice(4, 8);
+    if (ftypCheck[0] === 0x66 && ftypCheck[1] === 0x74 && 
+        ftypCheck[2] === 0x79 && ftypCheck[3] === 0x70) { // 'ftyp'
+      return { valid: true, format: 'MP4' };
+    }
+  }
+  
+  // Check other signatures
   for (const [format, signature] of Object.entries(signatures)) {
-    if (signature.every((byte, index) => imageBuffer[index] === byte)) {
+    if (format === 'MP4' || format === 'MOV') continue; // Already checked above
+    
+    if (signature.every((byte, index) => mediaBuffer[index] === byte)) {
       return { valid: true, format };
     }
   }
   
-  return { valid: false, error: 'Unsupported image format (need JPEG, PNG, GIF, or WebP)' };
+  const supportedFormats = expectedType === 'video' 
+    ? 'MP4, MOV, AVI' 
+    : 'JPEG, PNG, GIF, WebP';
+    
+  return { 
+    valid: false, 
+    error: `Unsupported ${expectedType} format (need ${supportedFormats})` 
+  };
+}
+
+// Backward compatibility function for images
+function validateImageBuffer(imageBuffer) {
+  return validateMediaBuffer(imageBuffer, 'image');
 }
 
 // AI Detection
@@ -543,6 +600,18 @@ async function analyzeVideoForAI(videoBuffer) {
   try {
     console.log('🎬 Starting video AI detection with frame extraction...');
     console.log('📏 Video buffer size:', videoBuffer.length, 'bytes');
+    
+    // Validate video format
+    const validation = validateMediaBuffer(videoBuffer, 'video');
+    if (!validation.valid) {
+      console.log('❌ Video validation failed:', validation.error);
+      return {
+        error: true,
+        message: validation.error
+      };
+    }
+    
+    console.log(`✅ Video validated as ${validation.format} format`);
     
     // Check video size (16MB limit for WhatsApp)
     const MAX_SIZE = 16 * 1024 * 1024; // 16MB
