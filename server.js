@@ -3,6 +3,10 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const twilio = require('twilio');
+const fs = require('fs').promises;
+const path = require('path');
+const os = require('os');
+const extractFrames = require('ffmpeg-extract-frames');
 
 const app = express();
 app.use(express.json());
@@ -124,6 +128,9 @@ async function handleMessage(message, value) {
       case 'image':
         await handleImage(message, fromNumber);
         break;
+      case 'video':
+        await handleVideo(message, fromNumber);
+        break;
       case 'text':
         await handleText(message, fromNumber);
         break;
@@ -145,17 +152,20 @@ async function handleTwilioMessage(message, fromNumber) {
       case 'image':
         await handleTwilioImage(message, fromNumber);
         break;
+      case 'video':
+        await handleTwilioVideo(message, fromNumber);
+        break;
       case 'text':
         await handleTwilioText(message, fromNumber);
         break;
       default:
         await sendTwilioMessage(fromNumber, 
           "🤖 *Welcome to AI Detection Bot!*\n\n" +
-          "📸 Send me images and I'll detect if they're AI-generated!\n\n" +
+          "📸 Send me images and videos and I'll detect if they're AI-generated!\n\n" +
           "💡 Commands:\n" +
           "• 'help' - More info\n" +
           "• 'stats' - Your usage\n\n" +
-          "🚀 Just send your image to get started!");
+          "🚀 Just send your media to get started!");
     }
   } catch (error) {
     console.error('❌ Error handling Twilio message:', error);
@@ -186,6 +196,109 @@ async function handleImage(message, fromNumber) {
   } catch (error) {
     console.error('❌ Image error:', error);
     await sendText(fromNumber, "🖼️ Couldn't analyze this image. Try a different format.");
+  }
+}
+
+// Handle video messages
+async function handleVideo(message, fromNumber) {
+  try {
+    console.log('🎥 Processing video...');
+    
+    await sendText(fromNumber, 
+      "🎥 *Video Analysis Starting...*\n\n" +
+      "⏳ Extracting frames and analyzing each for AI detection...\n" +
+      "📊 This may take 15-30 seconds depending on video length!"
+    );
+    
+    const mediaUrl = await getMediaUrl(message.video.id);
+    const videoBuffer = await downloadMedia(mediaUrl);
+    
+    const detection = await analyzeVideoForAI(videoBuffer);
+    
+    if (detection.error) {
+      await sendText(fromNumber, 
+        "🚫 *Video Analysis Failed*\n\n" +
+        `⚠️ ${detection.message}\n\n` +
+        "💡 Try:\n" +
+        "• Shorter video (max 60 seconds)\n" +
+        "• Smaller file size (max 16MB)\n" +
+        "• MP4 format\n" +
+        "• Better quality video"
+      );
+      return;
+    }
+    
+    await sendResult(fromNumber, detection);
+    updateAnalytics(fromNumber, 'video', detection);
+    
+  } catch (error) {
+    console.error('❌ Video processing error:', error);
+    await sendText(fromNumber, 
+      "🎥 Couldn't analyze this video. Please try:\n" +
+      "• Shorter video (max 60 seconds)\n" +
+      "• Smaller file size (max 16MB)\n" +
+      "• MP4 format\n" +
+      "• Better quality video"
+    );
+  }
+}
+
+// Handle Twilio video messages
+async function handleTwilioVideo(message, fromNumber) {
+  try {
+    console.log('🎥 Processing Twilio video...');
+    
+    await sendTwilioMessage(fromNumber, 
+      "🎥 *Video Analysis Starting...*\n\n" +
+      "⏳ Extracting frames and analyzing each for AI detection...\n" +
+      "📊 This may take 15-30 seconds depending on video length!"
+    );
+    
+    let videoBuffer;
+    
+    if (message.video && message.video.url) {
+      const response = await axios.get(message.video.url, {
+        responseType: 'arraybuffer',
+        auth: {
+          username: TWILIO_ACCOUNT_SID,
+          password: TWILIO_AUTH_TOKEN
+        }
+      });
+      videoBuffer = Buffer.from(response.data);
+    } else if (message.video && message.video.id) {
+      const mediaUrl = await getMediaUrl(message.video.id);
+      videoBuffer = await downloadMedia(mediaUrl);
+    } else {
+      throw new Error('No video URL or ID found');
+    }
+    
+    const detection = await analyzeVideoForAI(videoBuffer);
+    
+    if (detection.error) {
+      await sendTwilioMessage(fromNumber, 
+        "🚫 *Video Analysis Failed*\n\n" +
+        `⚠️ ${detection.message}\n\n` +
+        "💡 Try:\n" +
+        "• Shorter video (max 60 seconds)\n" +
+        "• Smaller file size (max 16MB)\n" +
+        "• MP4 format\n" +
+        "• Better quality video"
+      );
+      return;
+    }
+    
+    await sendTwilioResult(fromNumber, detection);
+    updateAnalytics(fromNumber, 'video', detection);
+    
+  } catch (error) {
+    console.error('❌ Twilio video processing error:', error);
+    await sendTwilioMessage(fromNumber, 
+      "🎥 Couldn't analyze this video. Please try:\n" +
+      "• Shorter video (max 60 seconds)\n" +
+      "• Smaller file size (max 16MB)\n" +
+      "• MP4 format\n" +
+      "• Better quality video"
+    );
   }
 }
 
@@ -255,11 +368,15 @@ async function handleTwilioText(message, fromNumber) {
   } else {
     await sendTwilioMessage(fromNumber,
       "🤖 *Welcome to AI Detection Bot!*\n\n" +
-      "📸 Send me images and I'll detect if they're AI-generated!\n\n" +
+      "📸🎥 Send me images and videos and I'll detect if they're AI-generated!\n\n" +
+      "✨ *Video Analysis Features:*\n" +
+      "• Frame-by-frame AI detection\n" +
+      "• Max 60 seconds / 16MB\n" +
+      "• High-accuracy multi-frame analysis\n\n" +
       "💡 Commands:\n" +
       "• 'help' - More info\n" +
       "• 'stats' - Your usage\n\n" +
-      "🚀 Just send your image to get started!");
+      "🚀 Just send your media to get started!");
   }
 }
 
@@ -329,6 +446,218 @@ async function detectAI(imageBuffer) {
   }
 }
 
+// Video AI Detection with Frame Extraction
+async function analyzeVideoForAI(videoBuffer) {
+  let tempFiles = [];
+  
+  try {
+    console.log('🎬 Starting video AI detection with frame extraction...');
+    console.log('📏 Video buffer size:', videoBuffer.length, 'bytes');
+    
+    // Check video size (16MB limit for WhatsApp)
+    const MAX_SIZE = 16 * 1024 * 1024; // 16MB
+    if (videoBuffer.length > MAX_SIZE) {
+      return {
+        error: true,
+        message: 'Video file too large (max 16MB supported)'
+      };
+    }
+    
+    // Create temp directory for processing
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'video-ai-'));
+    const videoPath = path.join(tempDir, 'input_video.mp4');
+    
+    // Save video buffer to temp file
+    await fs.writeFile(videoPath, videoBuffer);
+    console.log('💾 Video saved to:', videoPath);
+    
+    // Extract video metadata to check duration
+    const ffprobe = require('util').promisify(require('child_process').exec);
+    let duration;
+    
+    try {
+      const { stdout } = await ffprobe(
+        `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${videoPath}"`
+      );
+      duration = parseFloat(stdout.trim());
+      console.log('⏱️ Video duration:', duration, 'seconds');
+      
+      // Reject videos over 60 seconds
+      if (duration > 60) {
+        await cleanupTempFiles([tempDir]);
+        return {
+          error: true,
+          message: 'Video too long (max 60 seconds supported). Your video is ' + Math.round(duration) + ' seconds.'
+        };
+      }
+    } catch (error) {
+      console.log('⚠️ Could not determine video duration, proceeding with analysis');
+      duration = 30; // Assume reasonable duration
+    }
+    
+    // Calculate frame extraction interval (every 2 seconds)
+    const frameInterval = 2;
+    const numFrames = Math.min(Math.ceil(duration / frameInterval), 30); // Max 30 frames
+    
+    console.log(`🔍 Extracting ${numFrames} frames (1 every ${frameInterval} seconds)...`);
+    
+    // Extract frames using ffmpeg-extract-frames
+    const framePattern = path.join(tempDir, 'frame_%d.jpg');
+    
+    try {
+      await extractFrames({
+        input: videoPath,
+        output: framePattern,
+        offsets: Array.from({ length: numFrames }, (_, i) => i * frameInterval)
+      });
+    } catch (error) {
+      console.error('❌ Frame extraction failed:', error);
+      await cleanupTempFiles([tempDir]);
+      return {
+        error: true,
+        message: 'Failed to extract video frames. Try a different video format.'
+      };
+    }
+    
+    // Read extracted frames
+    const frameFiles = await fs.readdir(tempDir);
+    const imageFrames = frameFiles.filter(file => file.startsWith('frame_') && file.endsWith('.jpg'));
+    
+    if (imageFrames.length === 0) {
+      await cleanupTempFiles([tempDir]);
+      return {
+        error: true,
+        message: 'No frames could be extracted from video'
+      };
+    }
+    
+    console.log(`📸 Successfully extracted ${imageFrames.length} frames`);
+    
+    // Analyze each frame for AI detection
+    const frameResults = [];
+    let highConfidenceAI = false;
+    let highestAIScore = 0;
+    let totalAIScore = 0;
+    let totalRealScore = 0;
+    let framesProcessed = 0;
+    
+    for (let i = 0; i < imageFrames.length; i++) {
+      const framePath = path.join(tempDir, imageFrames[i]);
+      tempFiles.push(framePath);
+      
+      try {
+        console.log(`🔍 Analyzing frame ${i + 1}/${imageFrames.length}...`);
+        
+        // Read frame as buffer
+        const frameBuffer = await fs.readFile(framePath);
+        
+        // Use existing AI detection for this frame
+        const frameDetection = await detectAI(frameBuffer);
+        
+        if (!frameDetection.error) {
+          frameResults.push({
+            frameIndex: i + 1,
+            isAI: frameDetection.isAI,
+            confidence: frameDetection.confidence,
+            aiScore: frameDetection.aiScore,
+            realScore: frameDetection.realScore,
+            model: frameDetection.model
+          });
+          
+          // Check for high-confidence AI detection (80% threshold)
+          if (frameDetection.isAI && frameDetection.confidence >= 80) {
+            console.log(`🚨 High-confidence AI detected in frame ${i + 1}: ${frameDetection.confidence}%`);
+            highConfidenceAI = true;
+          }
+          
+          // Track highest AI score and accumulate for averaging
+          if (frameDetection.aiScore > highestAIScore) {
+            highestAIScore = frameDetection.aiScore;
+          }
+          
+          totalAIScore += frameDetection.aiScore;
+          totalRealScore += frameDetection.realScore;
+          framesProcessed++;
+        } else {
+          console.log(`⚠️ Frame ${i + 1} analysis failed, skipping...`);
+        }
+      } catch (error) {
+        console.error(`❌ Error analyzing frame ${i + 1}:`, error);
+      }
+    }
+    
+    // Clean up temp files
+    await cleanupTempFiles([tempDir]);
+    
+    if (framesProcessed === 0) {
+      return {
+        error: true,
+        message: 'Could not analyze any video frames'
+      };
+    }
+    
+    // Calculate final results
+    const avgAIScore = Math.round(totalAIScore / framesProcessed);
+    const avgRealScore = Math.round(totalRealScore / framesProcessed);
+    
+    // Decision logic: High-confidence AI (80%+) wins, otherwise use average
+    let finalIsAI, finalConfidence;
+    
+    if (highConfidenceAI) {
+      finalIsAI = true;
+      finalConfidence = Math.min(95, Math.max(80, highestAIScore));
+      console.log(`✅ Video marked as AI due to high-confidence frame detection`);
+    } else {
+      finalIsAI = avgAIScore > avgRealScore;
+      finalConfidence = Math.max(60, Math.min(95, finalIsAI ? avgAIScore : avgRealScore));
+      console.log(`✅ Video result based on average: ${finalIsAI ? 'AI' : 'Real'} (${finalConfidence}%)`);
+    }
+    
+    console.log(`📊 Final video analysis: ${finalIsAI ? 'AI' : 'Real'} (${finalConfidence}%)`);
+    console.log(`📈 Frames processed: ${framesProcessed}/${imageFrames.length}`);
+    console.log(`📊 Average scores - AI: ${avgAIScore}%, Real: ${avgRealScore}%`);
+    
+    return {
+      isAI: finalIsAI,
+      confidence: finalConfidence,
+      aiScore: avgAIScore,
+      realScore: avgRealScore,
+      model: 'Video Frame Analysis',
+      service: 'HuggingFace Multi-Frame',
+      framesAnalyzed: framesProcessed,
+      totalFramesExtracted: imageFrames.length,
+      videoDuration: Math.round(duration),
+      highConfidenceDetection: highConfidenceAI,
+      frameResults: frameResults.slice(0, 5) // Include up to 5 frame details
+    };
+    
+  } catch (error) {
+    console.error('❌ Video analysis error:', error);
+    
+    // Clean up any temp files on error
+    if (tempFiles.length > 0) {
+      await cleanupTempFiles(tempFiles.map(f => path.dirname(f)));
+    }
+    
+    return {
+      error: true,
+      message: 'Video analysis failed. Please try a different video format or shorter duration.'
+    };
+  }
+}
+
+// Helper function to clean up temporary files
+async function cleanupTempFiles(directories) {
+  for (const dir of directories) {
+    try {
+      await fs.rmdir(dir, { recursive: true });
+      console.log('🧹 Cleaned up temp directory:', dir);
+    } catch (error) {
+      console.log('⚠️ Could not clean up temp directory:', dir);
+    }
+  }
+}
+
 // Get media URL
 async function getMediaUrl(mediaId) {
   const response = await axios.get(
@@ -372,11 +701,15 @@ async function sendResult(toNumber, detection) {
 async function sendWelcome(toNumber) {
   const message = 
     "🤖 *Welcome to AI Detection Bot!*\n\n" +
-    "📸 Send me images and I'll detect if they're AI-generated!\n\n" +
+    "📸🎥 Send me images and videos and I'll detect if they're AI-generated!\n\n" +
+    "✨ *Video Analysis Features:*\n" +
+    "• Frame-by-frame AI detection\n" +
+    "• Max 60 seconds / 16MB\n" +
+    "• High-accuracy multi-frame analysis\n\n" +
     "💡 Commands:\n" +
     "• 'help' - More info\n" +
     "• 'stats' - Your usage\n\n" +
-    "🚀 Just send your image to get started!";
+    "🚀 Just send your media to get started!";
 
   await sendText(toNumber, message);
 }
@@ -386,16 +719,21 @@ async function sendHelp(toNumber) {
   const message = 
     "🆘 *AI Detection Bot Help*\n\n" +
     "*How to use:*\n" +
-    "1. Send any image\n" +
-    "2. Get instant AI detection results\n" +
-    "3. See confidence scores\n\n" +
+    "1. Send any image or video\n" +
+    "2. Get AI detection results with confidence scores\n" +
+    "3. Videos analyzed frame-by-frame for accuracy\n\n" +
     "*Commands:*\n" +
     "• 'help' - This message\n" +
     "• 'stats' - Usage statistics\n\n" +
     "*What I detect:*\n" +
     "• AI-generated images\n" +
+    "• AI-generated videos\n" +
     "• Deepfakes\n" +
     "• Synthetic media\n\n" +
+    "*Video Limits:*\n" +
+    "• Max 60 seconds duration\n" +
+    "• Max 16MB file size\n" +
+    "• Supports MP4, MOV formats\n\n" +
     "🔬 Powered by HuggingFace AI models!";
 
   await sendText(toNumber, message);
@@ -405,23 +743,27 @@ async function sendHelp(toNumber) {
 async function sendStats(toNumber) {
   const stats = userStats.get(toNumber) || { 
     messagesCount: 0, 
-    imagesAnalyzed: 0, 
+    imagesAnalyzed: 0,
+    videosAnalyzed: 0, 
     aiDetected: 0,
     joinDate: new Date() 
   };
   
   const daysSince = Math.floor((new Date() - stats.joinDate) / (1000 * 60 * 60 * 24));
-  const aiPercentage = stats.imagesAnalyzed > 0 ? 
-    Math.round((stats.aiDetected / stats.imagesAnalyzed) * 100) : 0;
+  const totalAnalyzed = stats.imagesAnalyzed + stats.videosAnalyzed;
+  const aiPercentage = totalAnalyzed > 0 ? 
+    Math.round((stats.aiDetected / totalAnalyzed) * 100) : 0;
   
   const message = 
     "📊 *Your Statistics*\n\n" +
     `👤 Member for: ${daysSince} days\n` +
     `💬 Messages: ${stats.messagesCount}\n` +
     `📸 Images analyzed: ${stats.imagesAnalyzed}\n` +
+    `🎥 Videos analyzed: ${stats.videosAnalyzed}\n` +
+    `📈 Total analyzed: ${totalAnalyzed}\n` +
     `🤖 AI detected: ${stats.aiDetected}\n` +
-    `📈 AI detection rate: ${aiPercentage}%\n\n` +
-    "📱 Send more images to analyze!";
+    `📊 AI detection rate: ${aiPercentage}%\n\n` +
+    "📱 Send more media to analyze!";
 
   await sendText(toNumber, message);
 }
@@ -555,23 +897,27 @@ async function sendTwilioHelp(toNumber) {
 async function sendTwilioStats(toNumber) {
   const stats = userStats.get(toNumber) || { 
     messagesCount: 0, 
-    imagesAnalyzed: 0, 
+    imagesAnalyzed: 0,
+    videosAnalyzed: 0, 
     aiDetected: 0,
     joinDate: new Date() 
   };
   
   const daysSince = Math.floor((new Date() - stats.joinDate) / (1000 * 60 * 60 * 24));
-  const aiPercentage = stats.imagesAnalyzed > 0 ? 
-    Math.round((stats.aiDetected / stats.imagesAnalyzed) * 100) : 0;
+  const totalAnalyzed = stats.imagesAnalyzed + stats.videosAnalyzed;
+  const aiPercentage = totalAnalyzed > 0 ? 
+    Math.round((stats.aiDetected / totalAnalyzed) * 100) : 0;
   
   const message = 
     "📊 *Your Statistics*\n\n" +
     `👤 Member for: ${daysSince} days\n` +
     `💬 Messages: ${stats.messagesCount}\n` +
     `📸 Images analyzed: ${stats.imagesAnalyzed}\n` +
+    `🎥 Videos analyzed: ${stats.videosAnalyzed}\n` +
+    `📈 Total analyzed: ${totalAnalyzed}\n` +
     `🤖 AI detected: ${stats.aiDetected}\n` +
-    `📈 AI detection rate: ${aiPercentage}%\n\n` +
-    "📱 Send more images to analyze!";
+    `📊 AI detection rate: ${aiPercentage}%\n\n` +
+    "📱 Send more media to analyze!";
 
   await sendTwilioMessage(toNumber, message);
 }
@@ -581,6 +927,7 @@ function updateUserStats(phoneNumber) {
   const stats = userStats.get(phoneNumber) || {
     messagesCount: 0,
     imagesAnalyzed: 0,
+    videosAnalyzed: 0,
     aiDetected: 0,
     joinDate: new Date()
   };
@@ -594,6 +941,7 @@ function updateAnalytics(phoneNumber, mediaType, detection) {
   const stats = userStats.get(phoneNumber);
   if (stats) {
     if (mediaType === 'image') stats.imagesAnalyzed++;
+    if (mediaType === 'video') stats.videosAnalyzed++;
     if (detection.isAI) stats.aiDetected++;
     userStats.set(phoneNumber, stats);
   }
