@@ -23,8 +23,20 @@ const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 
-const twilioClient = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN ? 
-  twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) : null;
+let twilioClient = null;
+try {
+  if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && 
+      TWILIO_ACCOUNT_SID !== 'your_twilio_account_sid' && 
+      TWILIO_AUTH_TOKEN !== 'your_twilio_auth_token') {
+    twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    console.log('✅ Twilio client initialized');
+  } else {
+    console.log('⚠️ Twilio not configured - SMS/WhatsApp via Twilio disabled');
+  }
+} catch (error) {
+  console.log('❌ Twilio initialization failed:', error.message);
+  twilioClient = null;
+}
 
 // AI Detection Models
 const AI_MODELS = [
@@ -430,6 +442,28 @@ async function detectAI(imageBuffer) {
         }
       } catch (error) {
         console.log(`❌ ${modelName} failed:`, error.message);
+        
+        if (error.response) {
+          console.log(`📊 Status: ${error.response.status}`);
+          console.log(`📋 Response data:`, error.response.data);
+          
+          // Check for specific error types
+          if (error.response.status === 400) {
+            console.log('🔍 Possible causes for 400 error:');
+            console.log('   - Invalid API token');
+            console.log('   - Model is loading (try again in 30s)');
+            console.log('   - Image format not supported');
+            console.log('   - Image too large');
+          }
+          
+          if (error.response.status === 401) {
+            console.log('🔑 Authentication failed - check HUGGINGFACE_TOKEN');
+          }
+          
+          if (error.response.status === 503) {
+            console.log('⏳ Model is loading - will retry automatically');
+          }
+        }
       }
     }
     
@@ -960,11 +994,37 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy', users: userStats.size });
 });
 
+// Validate configuration on startup
+function validateConfig() {
+  const issues = [];
+  
+  if (!HUGGINGFACE_TOKEN || HUGGINGFACE_TOKEN === 'your_huggingface_token_here') {
+    issues.push('❌ HUGGINGFACE_TOKEN not configured');
+  }
+  
+  if (!WHATSAPP_TOKEN || WHATSAPP_TOKEN === 'your_long_lived_token_here') {
+    issues.push('⚠️ WHATSAPP_TOKEN not configured (WhatsApp features disabled)');
+  }
+  
+  if (!PHONE_NUMBER_ID || PHONE_NUMBER_ID === 'your_phone_number_id_here') {
+    issues.push('⚠️ PHONE_NUMBER_ID not configured (WhatsApp features disabled)');
+  }
+  
+  if (issues.length > 0) {
+    console.log('\n🔧 Configuration Issues:');
+    issues.forEach(issue => console.log(`   ${issue}`));
+    console.log('\n💡 Please update your .env file with real API credentials\n');
+  }
+}
+
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log('🚀 WhatsApp AI Detection Bot started!');
   console.log(`📡 Server running on port ${PORT}`);
+  
+  // Validate configuration
+  validateConfig();
 });
 
 module.exports = app;
