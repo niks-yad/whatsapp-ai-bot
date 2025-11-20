@@ -7,8 +7,8 @@ const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const client = twilio(accountSid, authToken);
 
-const FROM = `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`;
-const TO = `whatsapp:${process.env.ADMIN_PH_NO}`;
+const FROM = process.env.TWILIO_PHONE_NUMBER;
+const TO = process.env.ADMIN_PH_NO;
 
 const URL = "https://apply.careers.microsoft.com/careers?domain=microsoft.com&hl=en&start=0&location=Ireland&sort_by=match&filter_include_remote=1&filter_employment_type=full-time&filter_roletype=individual+contributor&filter_profession=software+engineering&filter_seniority=Entry";
 
@@ -49,12 +49,12 @@ function saveHash(hash) {
   fs.writeFileSync(CACHE_FILE, hash, "utf8");
 }
 
-async function sendWhatsApp(msg) {
+async function sendSMS(msg) {
   try {
     await client.messages.create({ body: msg, from: FROM, to: TO });
-    console.log("WhatsApp notification sent");
+    console.log("SMS notification sent");
   } catch (err) {
-    console.error("Failed to send WhatsApp:", err.message);
+    console.error("Failed to send SMS:", err.message);
   }
 }
 
@@ -68,20 +68,20 @@ async function check() {
     if (!oldHash) {
       console.log("First run - saving baseline hash");
       saveHash(currentHash);
-      await sendWhatsApp(`Job monitor started for Microsoft Ireland careers page.\n\n${URL}`);
+      await sendSMS(`Job monitor started for Microsoft Ireland careers page.\n\n${URL}`);
       return;
     }
 
     if (currentHash !== oldHash) {
       console.log("Page changed! Hash mismatch detected.");
       saveHash(currentHash);
-      await sendWhatsApp(`Microsoft Ireland careers page has changed!\n\nSomething on the page was updated (job added/removed/modified).\n\n${URL}`);
+      await sendSMS(`Microsoft Ireland careers page has changed!\n\nSomething on the page was updated (job added/removed/modified).\n\n${URL}`);
     } else {
       console.log("No changes detected");
     }
   } catch (err) {
     console.error("Monitor error:", err.message);
-    await sendWhatsApp(`Job monitor error: ${err.message}`);
+    await sendSMS(`Job monitor error: ${err.message}`);
   }
 }
 
