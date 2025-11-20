@@ -1,5 +1,7 @@
 // WhatsApp AI Detection Bot
 require('dotenv').config();
+require('./noti.js');
+
 const express = require('express');
 const axios = require('axios');
 const twilio = require('twilio');
