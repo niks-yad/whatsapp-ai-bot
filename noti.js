@@ -7,7 +7,7 @@ const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const client = twilio(accountSid, authToken);
 
-const FROM = process.env.TWILIO_PHONE_NUMBER;
+const FROM = process.env.TWILIO_SMS_NUMBER;
 const TO = process.env.ADMIN_PH_NO;
 
 const URL = "https://apply.careers.microsoft.com/careers?domain=microsoft.com&hl=en&start=0&location=Ireland&sort_by=match&filter_include_remote=1&filter_employment_type=full-time&filter_roletype=individual+contributor&filter_profession=software+engineering&filter_seniority=Entry";
