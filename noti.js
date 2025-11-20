@@ -12,7 +12,7 @@ const TO = `whatsapp:${process.env.ADMIN_PH_NO}`;
 
 const URL = "https://apply.careers.microsoft.com/careers?domain=microsoft.com&hl=en&start=0&location=Ireland&sort_by=match&filter_include_remote=1&filter_employment_type=full-time&filter_roletype=individual+contributor&filter_profession=software+engineering&filter_seniority=Entry";
 
-const CACHE_FILE = "noti_cache_jobs.json";
+const CACHE_FILE = "noti_cache_hash.txt";
 
 async function fetchPage() {
   return new Promise((resolve, reject) => {
@@ -36,43 +36,23 @@ async function fetchPage() {
   });
 }
 
-function extractJobIds(html) {
-  const jobIds = [];
-  const regex = /data-job-id="([^"]+)"/g;
-  let match;
-  while ((match = regex.exec(html)) !== null) {
-    jobIds.push(match[1]);
-  }
-
-  if (jobIds.length === 0) {
-    const altRegex = /job[_-]id["\s:=]+([a-zA-Z0-9_-]+)/gi;
-    while ((match = altRegex.exec(html)) !== null) {
-      jobIds.push(match[1]);
-    }
-  }
-
-  return [...new Set(jobIds)];
+function hashContent(content) {
+  return crypto.createHash("sha256").update(content).digest("hex");
 }
 
-function loadOldJobs() {
+function loadOldHash() {
   if (!fs.existsSync(CACHE_FILE)) return null;
-  try {
-    const data = fs.readFileSync(CACHE_FILE, "utf8");
-    return JSON.parse(data);
-  } catch (err) {
-    console.error("Cache parse error:", err.message);
-    return null;
-  }
+  return fs.readFileSync(CACHE_FILE, "utf8").trim();
 }
 
-function saveJobs(jobs) {
-  fs.writeFileSync(CACHE_FILE, JSON.stringify({ jobs, timestamp: new Date().toISOString() }, null, 2), "utf8");
+function saveHash(hash) {
+  fs.writeFileSync(CACHE_FILE, hash, "utf8");
 }
 
 async function sendWhatsApp(msg) {
   try {
     await client.messages.create({ body: msg, from: FROM, to: TO });
-    console.log("WhatsApp sent:", msg);
+    console.log("WhatsApp notification sent");
   } catch (err) {
     console.error("Failed to send WhatsApp:", err.message);
   }
@@ -80,53 +60,28 @@ async function sendWhatsApp(msg) {
 
 async function check() {
   try {
-    console.log(`[${new Date().toISOString()}] Checking for job changes...`);
+    console.log(`[${new Date().toISOString()}] Checking for page changes...`);
     const html = await fetchPage();
-    const currentJobs = extractJobIds(html);
+    const currentHash = hashContent(html);
+    const oldHash = loadOldHash();
 
-    if (currentJobs.length === 0) {
-      console.warn("No jobs found - page structure may have changed or page failed to load properly");
+    if (!oldHash) {
+      console.log("First run - saving baseline hash");
+      saveHash(currentHash);
+      await sendWhatsApp(`Job monitor started for Microsoft Ireland careers page.\n\n${URL}`);
       return;
     }
 
-    console.log(`Found ${currentJobs.length} jobs on page`);
-
-    const oldData = loadOldJobs();
-
-    if (!oldData) {
-      console.log("First run - saving initial job list");
-      saveJobs(currentJobs);
-      await sendWhatsApp(`Job monitor started. Tracking ${currentJobs.length} jobs at Microsoft Ireland.`);
-      return;
-    }
-
-    const oldJobs = oldData.jobs || [];
-    const newJobsAdded = currentJobs.filter(id => !oldJobs.includes(id));
-    const jobsRemoved = oldJobs.filter(id => !currentJobs.includes(id));
-
-    if (newJobsAdded.length > 0 || jobsRemoved.length > 0) {
-      console.log("Change detected!");
-      console.log(`- New jobs: ${newJobsAdded.length}`);
-      console.log(`- Removed jobs: ${jobsRemoved.length}`);
-
-      saveJobs(currentJobs);
-
-      let message = "Microsoft Ireland Jobs Update:\n\n";
-      if (newJobsAdded.length > 0) {
-        message += `✅ ${newJobsAdded.length} new job(s) posted\n`;
-      }
-      if (jobsRemoved.length > 0) {
-        message += `❌ ${jobsRemoved.length} job(s) removed\n`;
-      }
-      message += `\nTotal jobs: ${currentJobs.length}\n\n${URL}`;
-
-      await sendWhatsApp(message);
+    if (currentHash !== oldHash) {
+      console.log("Page changed! Hash mismatch detected.");
+      saveHash(currentHash);
+      await sendWhatsApp(`Microsoft Ireland careers page has changed!\n\nSomething on the page was updated (job added/removed/modified).\n\n${URL}`);
     } else {
       console.log("No changes detected");
     }
   } catch (err) {
     console.error("Monitor error:", err.message);
-    await sendWhatsApp(`⚠️ Job monitor error: ${err.message}`);
+    await sendWhatsApp(`Job monitor error: ${err.message}`);
   }
 }
 
