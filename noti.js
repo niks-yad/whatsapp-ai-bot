@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const fs = require("fs");
 const crypto = require("crypto");
 const https = require("https");
@@ -13,6 +15,22 @@ const TO = process.env.ADMIN_PH_NO;
 const URL = "https://apply.careers.microsoft.com/careers?domain=microsoft.com&hl=en&start=0&location=Ireland&sort_by=match&filter_include_remote=1&filter_employment_type=full-time&filter_roletype=individual+contributor&filter_profession=software+engineering&filter_seniority=Entry";
 
 const CACHE_FILE = "noti_cache_hash.txt";
+const STATE_FILE = "noti_state.json";
+
+function loadState() {
+  if (!fs.existsSync(STATE_FILE)) {
+    return { lastChangeDate: null, dailyMessageSent: false };
+  }
+  try {
+    return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+  } catch (err) {
+    return { lastChangeDate: null, dailyMessageSent: false };
+  }
+}
+
+function saveState(state) {
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
+}
 
 async function fetchPage() {
   return new Promise((resolve, reject) => {
@@ -58,16 +76,45 @@ async function sendSMS(msg) {
   }
 }
 
+async function checkDailyMessage() {
+  const state = loadState();
+  const now = new Date();
+  const utcHour = now.getUTCHours();
+  const today = now.toISOString().split('T')[0];
+
+  // Check if it's 8pm UTC (20:00)
+  if (utcHour === 20) {
+    // If no change today and message not sent yet
+    if (state.lastChangeDate !== today && !state.dailyMessageSent) {
+      console.log("No changes today - sending daily summary");
+      await sendSMS(`Daily Update: No changes detected on Microsoft Ireland careers page today.\n\n${URL}`);
+      state.dailyMessageSent = true;
+      saveState(state);
+    }
+  } else {
+    // Reset dailyMessageSent flag if it's past 8pm
+    if (utcHour > 20 && state.dailyMessageSent) {
+      state.dailyMessageSent = false;
+      saveState(state);
+    }
+  }
+}
+
 async function check() {
   try {
     console.log(`[${new Date().toISOString()}] Checking for page changes...`);
     const html = await fetchPage();
     const currentHash = hashContent(html);
     const oldHash = loadOldHash();
+    const state = loadState();
+    const today = new Date().toISOString().split('T')[0];
 
     if (!oldHash) {
       console.log("First run - saving baseline hash");
       saveHash(currentHash);
+      state.lastChangeDate = today;
+      state.dailyMessageSent = false;
+      saveState(state);
       await sendSMS(`Job monitor started for Microsoft Ireland careers page.\n\n${URL}`);
       return;
     }
@@ -75,10 +122,19 @@ async function check() {
     if (currentHash !== oldHash) {
       console.log("Page changed! Hash mismatch detected.");
       saveHash(currentHash);
+
+      // Mark that we had a change today and reset daily message flag
+      state.lastChangeDate = today;
+      state.dailyMessageSent = true; // Prevent daily "no change" message
+      saveState(state);
+
       await sendSMS(`Microsoft Ireland careers page has changed!\n\nSomething on the page was updated (job added/removed/modified).\n\n${URL}`);
     } else {
       console.log("No changes detected");
     }
+
+    // Check if we need to send daily message
+    await checkDailyMessage();
   } catch (err) {
     console.error("Monitor error:", err.message);
     await sendSMS(`Job monitor error: ${err.message}`);

@@ -3,6 +3,8 @@ node_modules/
 *.log
 .gitignore
 test_vid.MP4
+noti_cache_hash.txt
+noti_state.json
 
 # Documentation backups
 README.md
